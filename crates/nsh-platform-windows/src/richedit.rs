@@ -39,8 +39,8 @@ use windows::{
             RECTL, S_FALSE, S_OK, SIZE, WPARAM,
         },
         Graphics::Gdi::{
-            ClientToScreen, GetDC, GetDeviceCaps, GetSysColor, HBITMAP, HDC, HPALETTE, HRGN,
-            LOGPIXELSY, ReleaseDC, SYS_COLOR_INDEX, ScreenToClient,
+            ClientToScreen, GetDC, GetSysColor, HBITMAP, HDC, HPALETTE, HRGN, ReleaseDC,
+            SYS_COLOR_INDEX, ScreenToClient,
         },
         System::LibraryLoader::{GetProcAddress, LoadLibraryW},
         UI::{
@@ -1120,15 +1120,11 @@ unsafe extern "system" fn tx_get_horz_extent(_: This, out: *mut i32) -> HRESULT 
 }
 
 /// The window's vertical DPI as GDI reports it, which the services convert
-/// twips to pixels with.
+/// twips to pixels with — the test scale's (`NSH_TEST_SCALE`) when one is
+/// forced, so a field's formats come out as they would on a monitor of
+/// that DPI.
 pub(crate) fn dpi(hwnd: HWND) -> f32 {
-    // SAFETY: a DC of the window, released after the query.
-    unsafe {
-        let dc = GetDC(Some(hwnd));
-        let dpi = GetDeviceCaps(Some(dc), LOGPIXELSY);
-        ReleaseDC(Some(hwnd), dc);
-        if dpi > 0 { dpi as f32 } else { 96.0 }
-    }
+    96.0 * crate::window::scale(hwnd)
 }
 
 #[cfg(test)]

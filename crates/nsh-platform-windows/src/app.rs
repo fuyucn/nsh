@@ -818,7 +818,7 @@ fn content_size(hwnd: HWND) -> Option<Size<nsh_core::Points>> {
     let mut rect = windows::Win32::Foundation::RECT::default();
     // SAFETY: a query with a local out value.
     unsafe { windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rect) }.ok()?;
-    let scale = crate::window::dpi(hwnd) as f32 / 96.0;
+    let scale = crate::window::scale(hwnd);
     Some(Size::new(
         px((rect.right - rect.left) as f32 / scale),
         px((rect.bottom - rect.top) as f32 / scale),

@@ -288,12 +288,13 @@ pub(crate) fn create(
     if parent.is_none() {
         OPEN.with(|o| o.set(o.get() + 1));
         // Sized in points at the window's own DPI (known once it exists).
-        let dpi = dpi(hwnd);
+        let scale = scale(hwnd);
+        let dpi = (scale * 96.0).round() as u32;
         let mut rect = RECT {
             left: 0,
             top: 0,
-            right: (size.0 as f32 * dpi as f32 / 96.0).round() as i32,
-            bottom: (size.1 as f32 * dpi as f32 / 96.0).round() as i32,
+            right: (size.0 as f32 * scale).round() as i32,
+            bottom: (size.1 as f32 * scale).round() as i32,
         };
         // SAFETY: plain calls on the window just made.
         unsafe {
@@ -742,6 +743,27 @@ pub(crate) fn dpi(hwnd: HWND) -> u32 {
     if dpi == 0 { 96 } else { dpi }
 }
 
+/// The scale a window renders at: its monitor's DPI over 96, unless the
+/// test environment forced one with `NSH_TEST_SCALE`. A forced scale
+/// stands in for a monitor the machine does not have, so a rendering at
+/// 150% can be reproduced (and screenshotted) on a 100% runner: every
+/// mapping between points and the window's pixels goes through this, the
+/// window opens at the forced size and the field's twips convert at the
+/// forced DPI, exactly as on a monitor of that DPI.
+pub(crate) fn scale(hwnd: HWND) -> f32 {
+    static FORCED: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    let forced = *FORCED.get_or_init(|| {
+        std::env::var("NSH_TEST_SCALE")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .filter(|s| (0.5..=4.0).contains(s))
+    });
+    match forced {
+        Some(scale) => scale,
+        None => crate::window::scale(hwnd),
+    }
+}
+
 /// Tells the surface the window's client size and scale.
 fn sync_size(surface: &Rc<Surface>, hwnd: HWND) {
     let mut rect = RECT::default();
@@ -751,7 +773,7 @@ fn sync_size(surface: &Rc<Surface>, hwnd: HWND) {
         (rect.right - rect.left).max(0) as u32,
         (rect.bottom - rect.top).max(0) as u32,
     );
-    surface.resized(pixels, dpi(hwnd) as f32 / 96.0);
+    surface.resized(pixels, scale(hwnd));
 }
 
 /// Wakes the surface of window `hwnd` (any thread).
@@ -1201,7 +1223,7 @@ fn handle(
         None => None,
     };
     let scale = match data.window {
-        Some(_) => dpi(hwnd) as f32 / 96.0,
+        Some(_) => scale(hwnd),
         None => surface.scale(),
     };
     let point = |l: LPARAM| (lo(l.0) as f32 / scale, hi(l.0) as f32 / scale);
@@ -1591,7 +1613,7 @@ fn window_api(
             // SAFETY: `lparam` is the window's MINMAXINFO.
             let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
             let attrs = shell.attrs();
-            let scale = dpi(hwnd) as f32 / 96.0;
+            let scale = scale(hwnd);
             let (l, t, r, b) = frame_extents(hwnd);
             crate::chrome::nc_max_size(hwnd, info);
             let (min, max) = crate::shell::track_sizes(&attrs, scale, (l + r, t + b));

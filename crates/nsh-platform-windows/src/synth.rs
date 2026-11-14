@@ -151,8 +151,8 @@ pub(crate) fn resize(surface: &Rc<Surface>, w: f32, h: f32) {
         },
     };
     let hwnd = surface.hwnd();
-    let dpi = crate::window::dpi(hwnd);
-    let s = dpi as f32 / 96.0;
+    let s = crate::window::scale(hwnd);
+    let dpi = (s * 96.0).round() as u32;
     let mut rect = RECT {
         left: 0,
         top: 0,
@@ -290,7 +290,7 @@ fn drawn(
     hwnd: HWND,
     root: Option<&NshView>,
 ) -> Result<(Vec<u8>, u32, u32), String> {
-    let scale = crate::window::dpi(hwnd) as f32 / 96.0;
+    let scale = crate::window::scale(hwnd);
     let pixels = crate::render::snapshot(surface, scale, root).map_err(|e| e.to_string())?;
     let mut rgba = pixels.data;
     for px in rgba.as_chunks_mut::<4>().0 {

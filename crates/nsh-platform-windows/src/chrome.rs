@@ -300,7 +300,7 @@ fn frame_thickness(hwnd: HWND) -> i32 {
 /// monitor's for one of the app's own.
 fn scale_of(surface: &Surface, hwnd: HWND) -> f32 {
     match crate::window::app_window_root(hwnd) {
-        Some(_) => crate::window::dpi(hwnd) as f32 / 96.0,
+        Some(_) => crate::window::scale(hwnd),
         None => surface.scale(),
     }
 }
@@ -1121,7 +1121,7 @@ pub(crate) fn press_close_button(hwnd: HWND) -> Result<(), String> {
         if attrs.hidden_title_bar() {
             let mut client = RECT::default();
             let _ = GetClientRect(hwnd, &mut client);
-            let scale = crate::window::dpi(hwnd) as f32 / 96.0;
+            let scale = crate::window::scale(hwnd);
             p.x = client.right - (BUTTON_WIDTH * scale / 2.0) as i32;
             p.y = (caption_height(hwnd) * scale / 2.0) as i32;
             let _ = ClientToScreen(hwnd, &mut p);

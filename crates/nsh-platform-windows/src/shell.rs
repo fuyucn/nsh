@@ -690,7 +690,7 @@ fn clamp_size(hwnd: HWND, attrs: &Attrs) {
     if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
         return;
     }
-    let scale = crate::window::dpi(hwnd) as f32 / 96.0;
+    let scale = crate::window::scale(hwnd);
     let current = (client.right - client.left, client.bottom - client.top);
     let next = clamped(current, attrs, scale);
     if next != current {
@@ -946,7 +946,7 @@ fn set_content_size(hwnd: HWND, width: Option<Points>, height: Option<Points>) {
     if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
         return;
     }
-    let scale = crate::window::dpi(hwnd) as f32 / 96.0;
+    let scale = crate::window::scale(hwnd);
     let px = |v: Option<Points>, or: i32| {
         v.filter(|v| v.0.is_finite() && v.0 > 0.0)
             .map_or(or, |v| (v.0 * scale).ceil() as i32)

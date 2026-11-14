@@ -2072,7 +2072,7 @@ impl WebItem {
     /// Pixels per point of the window it is in.
     fn scale(&self) -> f32 {
         match self.host.get() {
-            Some((window, hwnd)) if window != ROOT_ID => crate::window::dpi(hwnd) as f32 / 96.0,
+            Some((window, hwnd)) if window != ROOT_ID => crate::window::scale(hwnd),
             _ => self.surface.upgrade().map_or(1.0, |s| s.scale()),
         }
     }

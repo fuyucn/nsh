@@ -202,7 +202,7 @@ fn scale_in(surface: &Surface, window: NodeId, hwnd: HWND) -> f32 {
     if window == ROOT_ID {
         surface.scale()
     } else {
-        crate::window::dpi(hwnd) as f32 / 96.0
+        crate::window::scale(hwnd)
     }
 }
 

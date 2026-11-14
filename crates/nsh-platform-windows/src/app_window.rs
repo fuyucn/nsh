@@ -500,7 +500,7 @@ fn resized(surface: &Surface, window: &AppWindow) {
         (rect.right - rect.left).max(0) as u32,
         (rect.bottom - rect.top).max(0) as u32,
     );
-    let scale = crate::window::dpi(window.hwnd) as f32 / 96.0;
+    let scale = crate::window::scale(window.hwnd);
     window.pixels.set(pixels);
     window.scale.set(scale);
     // Minimized: the root keeps its size.
