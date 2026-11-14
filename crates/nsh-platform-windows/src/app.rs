@@ -686,6 +686,7 @@ fn wait_for_replaced_process() {
 
 /// [`run_app`] on the calling thread.
 fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+    startup_trace("run_on_this_thread entered");
     STANDALONE.set(true);
     if options.background {
         crate::window::run_in_background();
@@ -704,8 +705,10 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         &options.file_types,
         options.single_instance,
     ) {
+        startup_trace("single-instance launch forwarded");
         return std::process::ExitCode::SUCCESS;
     }
+    startup_trace("linking start completed");
     // The app to run, when it is known now (a dev server's comes later).
     let app = match &source {
         AppSource::Rust(root) => Some(App::Rust(root.clone())),
@@ -751,23 +754,30 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
             return std::process::ExitCode::FAILURE;
         }
     };
+    startup_trace("AppView::make completed");
     view.standalone.set(true);
     crate::linking::launch(view.surface());
+    startup_trace("before view.load");
     match source {
         AppSource::Rust(root) => view.load(App::Rust(root)),
         AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
         #[cfg(feature = "dev")]
         AppSource::DevServer(url) => crate::dev::start(&view, url),
     }
+    startup_trace("view.load completed");
     crate::system::environment_applied(view.surface());
+    startup_trace("environment applied");
     crate::linking::attach(view.surface());
     install_shortcuts(&view);
     view.place_main_window(&launch, kept);
+    startup_trace(&format!("launch visible={}", launch.visible_at_launch()));
     // nsh.json `window.defaultVisible: false`: the window is made and the
     // app runs in it, unseen, until it shows it (a tray app).
     if !held {
         if launch.visible_at_launch() {
+            startup_trace("before view.show");
             view.show();
+            startup_trace("after view.show");
         } else {
             log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
         }
@@ -793,6 +803,15 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         std::process::ExitCode::SUCCESS
     } else {
         std::process::ExitCode::FAILURE
+    }
+}
+
+fn startup_trace(stage: &str) {
+    use std::io::Write as _;
+
+    let path = std::env::temp_dir().join("nsh-windows-startup-trace.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{stage}");
     }
 }
 

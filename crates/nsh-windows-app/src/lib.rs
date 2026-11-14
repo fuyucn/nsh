@@ -15,7 +15,9 @@
 pub fn main() -> std::process::ExitCode {
     use nsh_platform_windows::{AppSource, AssetBase, Bundle, run_app};
 
+    startup_trace("runner main entered");
     let (dir, mut options) = setup();
+    startup_trace(&format!("setup completed: {}", dir.display()));
     // SAFETY: the bytecode is a resource of this app's own package.
     let bundle = match unsafe { Bundle::read_trusted(&dir.join("bundle.nshc")) } {
         Ok(bundle) => bundle,
@@ -27,10 +29,23 @@ pub fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
+    startup_trace("bundle loaded");
     let data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
     let launch = nsh_engine::updates::launch(bundle, &dir, data_dir.as_deref());
+    startup_trace("updates launch completed");
     options.asset_base = Some(AssetBase::Directory(launch.assets));
+    startup_trace("before run_app");
     run_app(AppSource::Bundle(launch.bundle), options)
+}
+
+#[cfg(windows)]
+fn startup_trace(stage: &str) {
+    use std::io::Write as _;
+
+    let path = std::env::temp_dir().join("nsh-windows-startup-trace.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{stage}");
+    }
 }
 
 /// Runs the Rust app whose root is `root` (until its window closes), with
