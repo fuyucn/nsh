@@ -92,11 +92,13 @@ use windows::{
             },
             DirectWrite::{
                 DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_WEIGHT, DWRITE_LINE_SPACING_METHOD_UNIFORM, DWRITE_TEXT_ALIGNMENT,
+                DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_LINE_SPACING_METHOD_UNIFORM, DWRITE_TEXT_ALIGNMENT,
                 DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_JUSTIFIED,
                 DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS,
                 DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
-                DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, IDWriteTextFormat,
+                DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, IDWriteFontCollection,
+                IDWriteFontFamily, IDWriteTextFormat,
                 IDWriteTextLayout,
             },
         },
@@ -150,41 +152,109 @@ use crate::{
 
 /// The face that has the CJK glyphs on this system, as DirectWrite's own
 /// per-character fallback picks for the app's text (which is why a title
-/// renders Chinese while a field shows a box for every character).
-/// Checked once: the installed fonts do not change under a live field.
-fn cjk_family() -> Option<&'static str> {
-    static FAMILY: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
-    *FAMILY.get_or_init(|| {
-        // The usual CJK companions of the UI font, Simplified Chinese
-        // first. A base install has none of them until the language
-        // feature is on, so none may exist: the field then shows what it
-        // always showed.
-        const CANDIDATES: [&str; 8] = [
-            "Microsoft YaHei UI",
-            "Microsoft YaHei",
-            "Yu Gothic UI",
-            "Meiryo UI",
-            "Malgun Gothic",
-            "Microsoft JhengHei UI",
-            "SimSun",
-            "MS Gothic",
-        ];
+/// renders Chinese while a field shows a box for every character). A
+/// family is taken only when its regular font really has the glyph: the
+/// usual UI companions first, then any family that does, UI-named ones
+/// ahead. Checked once: the installed fonts do not change under a live
+/// field.
+fn cjk_family() -> Option<String> {
+    static FAMILY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    FAMILY.get_or_init(|| {
+        const PROBE: u32 = 0x4E2D; // 中
         let factory = crate::gfx::dwrite();
         let mut collection = None;
         // SAFETY: a COM call with a local out value.
         unsafe { factory.GetSystemFontCollection(&mut collection, false) }.ok()?;
         let collection = collection?;
-        CANDIDATES.into_iter().find(|name| {
-            let (mut index, mut exists) = (0u32, BOOL(0));
-            // SAFETY: a query on a live collection with local out values.
-            unsafe {
-                collection
-                    .FindFamilyName(&HSTRING::from(*name), &mut index, &mut exists)
-                    .is_ok()
-                    && exists.as_bool()
+        for name in [
+            "Microsoft YaHei UI",
+            "Yu Gothic UI",
+            "Meiryo UI",
+            "Malgun Gothic",
+            "Microsoft JhengHei UI",
+            "Microsoft YaHei",
+        ] {
+            if has_cjk_font(&collection, name, PROBE) {
+                return Some(name.to_owned());
             }
-        })
+        }
+        // Any family that has the glyph, the UI-named ones first: the
+        // classic collection's names differ per install, and a Windows
+        // without the usual companions still draws the app's text.
+        let count = unsafe { collection.GetFontFamilyCount() };
+        let mut best: Option<(usize, String)> = None;
+        for index in 0..count {
+            // SAFETY: COM calls on a live collection; local out values.
+            let family = unsafe { collection.GetFontFamily(index) }.ok()?;
+            let font = unsafe {
+                family.GetFirstMatchingFont(
+                    DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL,
+                )
+            }
+            .ok()?;
+            let has = unsafe { font.HasCharacter(PROBE) }
+                .ok()
+                .is_some_and(|h| h.as_bool());
+            if !has {
+                continue;
+            }
+            let name = family_name(&family)?;
+            let score = ["Microsoft YaHei", "Hei", "Gothic", "Ming", "Sun", "Song"]
+                .iter()
+                .position(|k| name.contains(k))
+                .unwrap_or(usize::MAX);
+            if best.as_ref().is_none_or(|(s, _)| score < *s) {
+                best = Some((score, name));
+            }
+        }
+        best.map(|(_, name)| name)
     })
+}
+
+/// Whether `name`'s regular font has the glyph.
+fn has_cjk_font(collection: &IDWriteFontCollection, name: &str, probe: u32) -> bool {
+    let (mut index, mut exists) = (0u32, BOOL(0));
+    // SAFETY: a query on a live collection with local out values.
+    unsafe {
+        collection
+            .FindFamilyName(&HSTRING::from(name), &mut index, &mut exists)
+            .is_ok()
+            && exists.as_bool()
+    }
+    && unsafe {
+        collection
+            .GetFontFamily(index)
+            .ok()
+            .and_then(|f| {
+                f.GetFirstMatchingFont(
+                    DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL,
+                )
+                .ok()
+            })
+            .is_some_and(|f| unsafe { f.HasCharacter(probe) }.ok().is_some_and(|h| h.as_bool()))
+    }
+}
+
+/// The family's English name, or its first.
+fn family_name(family: &IDWriteFontFamily) -> Option<String> {
+    // SAFETY: COM calls on a live family; local out values and buffers.
+    unsafe {
+        let names = family.GetFamilyNames().ok()?;
+        let mut index = 0u32;
+        let mut exists = BOOL(0);
+        let _ = names.FindLocaleName("en-us", &mut index, &mut exists);
+        if !exists.as_bool() {
+            index = 0;
+        }
+        let len = names.GetStringLength(index).ok()? as usize;
+        let mut buffer = vec![0u16; len + 1];
+        names.GetString(index, &mut buffer).ok()?;
+        Some(String::from_utf16_lossy(&buffer[..len]))
+    }
 }
 
 /// The code point at UTF-16 offset `at`, and its length in units.
