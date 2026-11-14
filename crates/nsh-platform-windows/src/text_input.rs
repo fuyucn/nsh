@@ -212,6 +212,7 @@ fn cjk_family() -> Option<String> {
         }
         best.map(|(_, name)| name)
     })
+    .clone()
 }
 
 /// Whether `name`'s regular font has the glyph.
