@@ -179,38 +179,10 @@ fn cjk_family() -> Option<String> {
                 return Some(name.to_owned());
             }
         }
-        // Any family that has the glyph, the UI-named ones first: the
-        // classic collection's names differ per install, and a Windows
-        // without the usual companions still draws the app's text.
-        let count = unsafe { collection.GetFontFamilyCount() };
-        let mut best: Option<(usize, String)> = None;
-        for index in 0..count {
-            // SAFETY: COM calls on a live collection; local out values.
-            let family = unsafe { collection.GetFontFamily(index) }.ok()?;
-            let font = unsafe {
-                family.GetFirstMatchingFont(
-                    DWRITE_FONT_WEIGHT_NORMAL,
-                    DWRITE_FONT_STRETCH_NORMAL,
-                    DWRITE_FONT_STYLE_NORMAL,
-                )
-            }
-            .ok()?;
-            let has = unsafe { font.HasCharacter(PROBE) }
-                .ok()
-                .is_some_and(|h| h.as_bool());
-            if !has {
-                continue;
-            }
-            let name = family_name(&family)?;
-            let score = ["Microsoft YaHei", "Hei", "Gothic", "Ming", "Sun", "Song"]
-                .iter()
-                .position(|k| name.contains(k))
-                .unwrap_or(usize::MAX);
-            if best.as_ref().is_none_or(|(s, _)| score < *s) {
-                best = Some((score, name));
-            }
-        }
-        best.map(|(_, name)| name)
+        // The scan of every family proved too slow to run on the typing
+        // thread: none of the companions above means no face here, and a
+        // field shows what it always showed.
+        None
     })
     .clone()
 }
@@ -241,27 +213,6 @@ fn has_cjk_font(collection: &IDWriteFontCollection, name: &str, probe: u32) -> b
             .is_some_and(|f| unsafe { f.HasCharacter(probe) }.ok().is_some_and(|h| h.as_bool()))
     };
     has
-}
-
-/// The family's English name, or its first.
-fn family_name(family: &IDWriteFontFamily) -> Option<String> {
-    // SAFETY: COM calls on a live family; local out values and buffers.
-    let names = unsafe { family.GetFamilyNames() }.ok()?;
-    let locale = HSTRING::from("en-us");
-    let mut index = 0u32;
-    let mut exists = BOOL(0);
-    // SAFETY: a query with local out values.
-    let _ = unsafe { names.FindLocaleName(&locale, &mut index, &mut exists) };
-    if !exists.as_bool() {
-        index = 0;
-    }
-    // SAFETY: reads the name into a local buffer.
-    let len = unsafe { names.GetStringLength(index) }.ok()? as usize;
-    let mut buffer = vec![0u16; len + 1];
-    // SAFETY: as above.
-    let got = unsafe { names.GetString(index, &mut buffer) };
-    got.ok()?;
-    Some(String::from_utf16_lossy(&buffer[..len]))
 }
 
 /// The code point at UTF-16 offset `at`, and its length in units.
