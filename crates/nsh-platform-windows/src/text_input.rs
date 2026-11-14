@@ -568,18 +568,23 @@ impl InputState {
         Some((at.y, (height - (client.bottom - client.top)).max(0)))
     }
 
-    /// RichEdit's client rectangle: the content box in the window's client
-    /// pixels (one line centered).
+    /// RichEdit's client rectangle: the content box in the target's DIPs
+    /// (one line centered). The services treat the rectangle as being in
+    /// the units they draw in (DirectWrite's DIPs on the target whose DPI
+    /// is the scale): at 100% these are the window's pixels, above it a
+    /// rectangle in pixels laid its text out too wide and too far, outside
+    /// the field (#1747).
     fn client(&self) -> RECT {
         let (ox, oy) = self.origin.get();
         let s = self.scale.get().max(0.01);
         let (w, h) = self.size.get();
-        let top = oy + (self.inset() * s).round() as i32;
+        let left = (ox as f32 / s).round() as i32;
+        let top = ((oy as f32 / s) + self.inset()).round() as i32;
         RECT {
-            left: ox,
+            left,
             top,
-            right: ox + (w * s).round() as i32,
-            bottom: top + (h * s).round() as i32,
+            right: left + w.round() as i32,
+            bottom: top + h.round() as i32,
         }
     }
 
@@ -803,10 +808,11 @@ impl InputState {
         if w <= 0.0 || h <= 0.0 {
             return;
         }
-        let s = self.scale.get().max(0.01);
+        // The bar's positions are the services' units (DIPs): a DIP is a
+        // point, nothing to divide.
         let (min, max, pos, _) = e.vscroll();
-        let content = ((max - min) as f32 / s).max(h);
-        let now = (pos as f32 / s, content, w, h);
+        let content = ((max - min) as f32).max(h);
+        let now = (pos as f32, content, w, h);
         if self.reported_scroll.replace(Some(now)) == Some(now) {
             return;
         }
@@ -835,11 +841,13 @@ impl InputState {
         let caret = self.editor.as_ref()?.caret();
         let (ox, oy) = self.origin.get();
         let s = self.scale.get().max(0.01);
+        // The caret's position is in the client rectangle's units (DIPs);
+        // a DIP is a point, and the origin comes back out of it.
         Some((
-            (caret.x - ox) as f32 / s,
-            (caret.y - oy) as f32 / s,
-            caret.width as f32 / s,
-            caret.height as f32 / s,
+            caret.x as f32 - ox as f32 / s,
+            caret.y as f32 - oy as f32 / s,
+            caret.width as f32,
+            caret.height as f32,
         ))
     }
 
@@ -860,9 +868,9 @@ impl InputState {
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
                 dc.BeginDraw();
-                // RichEdit maps its client rectangle through the target's
-                // DPI and draws in DIPs: only the origin comes back to the
-                // view's points (the scale is the DPI's already).
+                // The services draw in their rectangle's units (DIPs, the
+                // scale is the DPI's): only the origin comes back to the
+                // view's points.
                 dc.SetTransform(&Matrix3x2::translation(-ox as f32 / s, -oy as f32 / s));
                 let drawn = e.draw(dc.as_raw(), bounds);
                 let ended = dc.EndDraw(None, None);
@@ -1780,8 +1788,10 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
     let content = content_rect(view, &input);
     let (ox, oy) = input.origin.get();
     let s = input.scale.get().max(0.01);
-    let x = ox + ((event.x - content.origin.x.0) * s).round() as i32;
-    let y = oy + ((event.y - content.origin.y.0) * s).round() as i32;
+    // The services' rectangle is in its units (DIPs), so the pointer goes
+    // over in DIPs too.
+    let x = (ox as f32 / s + (event.x - content.origin.x.0)).round() as i32;
+    let y = (oy as f32 / s + (event.y - content.origin.y.0)).round() as i32;
     let mut keys = 0;
     if event.modifiers.shift {
         keys |= MK_SHIFT;
@@ -1838,8 +1848,8 @@ pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
     let Some((before, max)) = input.text_scroll() else {
         return false;
     };
-    let s = input.scale.get().max(0.01);
-    let to = (before as f32 + dy * s).round() as i32;
+    // The services' scroll is in DIPs, so a point of wheel goes a point up.
+    let to = (before as f32 + dy).round() as i32;
     // Up to the top; down to the last line, never further than it is.
     let y = if dy > 0.0 {
         to.min(max).max(before)
@@ -1891,10 +1901,9 @@ pub(crate) fn scroll_to(view: &NshView, y: Points) {
     if !input.multiline() {
         return;
     }
-    let s = input.scale.get().max(0.01);
     let mut at = windows::Win32::Foundation::POINT {
         x: 0,
-        y: (y.0 * s).round().max(0.0) as i32,
+        y: y.0.round().max(0.0) as i32,
     };
     input.send(EM_SETSCROLLPOS, 0, &mut at as *mut _ as isize);
     view.changed();
