@@ -164,7 +164,8 @@ fn cjk_family() -> Option<String> {
         let factory = crate::gfx::dwrite();
         let mut collection = None;
         // SAFETY: a COM call with a local out value.
-        unsafe { factory.GetSystemFontCollection(&mut collection, false) }.ok()?;
+        let got = unsafe { factory.GetSystemFontCollection(&mut collection, false) };
+        got.ok()?;
         let collection = collection?;
         for name in [
             "Microsoft YaHei UI",
@@ -217,13 +218,14 @@ fn cjk_family() -> Option<String> {
 fn has_cjk_font(collection: &IDWriteFontCollection, name: &str, probe: u32) -> bool {
     let (mut index, mut exists) = (0u32, BOOL(0));
     // SAFETY: a query on a live collection with local out values.
-    unsafe {
-        collection
-            .FindFamilyName(&HSTRING::from(name), &mut index, &mut exists)
-            .is_ok()
-            && exists.as_bool()
+    let found = unsafe {
+        collection.FindFamilyName(&HSTRING::from(name), &mut index, &mut exists)
+    };
+    if found.is_err() || !exists.as_bool() {
+        return false;
     }
-    && unsafe {
+    // SAFETY: COM calls on a live collection; the family and its font.
+    let has = unsafe {
         collection
             .GetFontFamily(index)
             .ok()
@@ -236,25 +238,29 @@ fn has_cjk_font(collection: &IDWriteFontCollection, name: &str, probe: u32) -> b
                 .ok()
             })
             .is_some_and(|f| unsafe { f.HasCharacter(probe) }.ok().is_some_and(|h| h.as_bool()))
-    }
+    };
+    has
 }
 
 /// The family's English name, or its first.
 fn family_name(family: &IDWriteFontFamily) -> Option<String> {
     // SAFETY: COM calls on a live family; local out values and buffers.
-    unsafe {
-        let names = family.GetFamilyNames().ok()?;
-        let mut index = 0u32;
-        let mut exists = BOOL(0);
-        let _ = names.FindLocaleName("en-us", &mut index, &mut exists);
-        if !exists.as_bool() {
-            index = 0;
-        }
-        let len = names.GetStringLength(index).ok()? as usize;
-        let mut buffer = vec![0u16; len + 1];
-        names.GetString(index, &mut buffer).ok()?;
-        Some(String::from_utf16_lossy(&buffer[..len]))
+    let names = unsafe { family.GetFamilyNames() }.ok()?;
+    let locale = HSTRING::from("en-us");
+    let mut index = 0u32;
+    let mut exists = BOOL(0);
+    // SAFETY: a query with local out values.
+    let _ = unsafe { names.FindLocaleName(&locale, &mut index, &mut exists) };
+    if !exists.as_bool() {
+        index = 0;
     }
+    // SAFETY: reads the name into a local buffer.
+    let len = unsafe { names.GetStringLength(index) }.ok()? as usize;
+    let mut buffer = vec![0u16; len + 1];
+    // SAFETY: as above.
+    let got = unsafe { names.GetString(index, &mut buffer) };
+    got.ok()?;
+    Some(String::from_utf16_lossy(&buffer[..len]))
 }
 
 /// The code point at UTF-16 offset `at`, and its length in units.
