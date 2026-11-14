@@ -83,7 +83,7 @@ use nsh_core::{
 use rustc_hash::FxHashMap;
 use windows::{
     Win32::{
-        Foundation::{BOOL, COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
+        Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Graphics::{
             Direct2D::{
                 Common::D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
@@ -135,7 +135,7 @@ use windows::{
             },
         },
     },
-    core::{HSTRING, Interface},
+    core::{BOOL, HSTRING, Interface},
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
@@ -653,14 +653,14 @@ impl InputState {
         if *self.cjk_applied.borrow() == ranges {
             return;
         }
-        let family = HSTRING::from(cjk_family().expect("checked above"));
+        let family = cjk_family().expect("checked above");
         let mut format = CHARFORMAT2W::default();
         format.Base.dwMask = CFM_FACE;
         for (d, u) in format
             .Base
             .szFaceName
             .iter_mut()
-            .zip(family.as_wide().iter().copied().take(31))
+            .zip(family.encode_utf16().take(31))
         {
             *d = u;
         }
