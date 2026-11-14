@@ -615,8 +615,10 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     let (done, ended) = std::sync::mpsc::channel();
     let ui = std::thread::Builder::new()
         .name("nsh-ui".into())
-        // Deep view trees recurse in drawing and hit testing.
-        .stack_size(8 << 20)
+        // Deep view trees recurse in drawing and hit testing; a debug build's
+        // frames are many times larger, so a development host takes a stack
+        // to match.
+        .stack_size(if cfg!(debug_assertions) { 64 << 20 } else { 8 << 20 })
         .spawn(move || {
             let job = job;
             let code = run_on_this_thread(job.0, job.1);
