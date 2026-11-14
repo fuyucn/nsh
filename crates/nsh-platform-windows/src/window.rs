@@ -750,6 +750,7 @@ pub(crate) fn dpi(hwnd: HWND) -> u32 {
 /// mapping between points and the window's pixels goes through this, the
 /// window opens at the forced size and the field's twips convert at the
 /// forced DPI, exactly as on a monitor of that DPI.
+#[allow(clippy::only_used_in_recursion)] // `dpi` is a different function
 pub(crate) fn scale(hwnd: HWND) -> f32 {
     static FORCED: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     let forced = *FORCED.get_or_init(|| {
