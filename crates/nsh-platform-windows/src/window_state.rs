@@ -169,7 +169,7 @@ pub(crate) fn state(hwnd: HWND) -> Option<WindowState> {
         state.focused = foreground && shown;
         state.content_bounds = content_bounds(hwnd, &screen).unwrap_or(state.bounds);
         state.display = Some(screen.display.id);
-        state.scale_factor = window::crate::window::scale(hwnd);
+        state.scale_factor = window::scale(hwnd);
         Some(state)
     })
 }
@@ -470,7 +470,7 @@ pub(crate) fn open_at(
     // with it (`WM_DPICHANGED`); the second time it is at the scale its
     // size is reckoned in.
     for _ in 0..2 {
-        let scale = window::crate::window::scale(hwnd);
+        let scale = window::scale(hwnd);
         let extents = window::frame_extents(hwnd);
         let frame = |at: f32| {
             let k = at / scale;
@@ -497,7 +497,7 @@ pub(crate) fn open_at(
 
 /// Sizes `hwnd` to a content of `content` points where it is.
 pub(crate) fn size_content(hwnd: HWND, content: nsh_core::geometry::Size<Points>) {
-    let scale = window::crate::window::scale(hwnd);
+    let scale = window::scale(hwnd);
     window::fit_content(
         hwnd,
         (
