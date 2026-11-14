@@ -85,6 +85,7 @@ use windows::{
     Win32::{
         Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Graphics::{
+            Gdi::DEFAULT_CHARSET,
             Direct2D::{
                 Common::D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
                 D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, ID2D1CommandList,
@@ -660,7 +661,8 @@ impl InputState {
         }
         let family = cjk_family().expect("checked above");
         let mut format = CHARFORMAT2W::default();
-        format.Base.dwMask = CFM_FACE;
+        format.Base.dwMask = CFM_FACE | CFM_CHARSET;
+        format.Base.bCharSet = DEFAULT_CHARSET;
         for (d, u) in format
             .Base
             .szFaceName
@@ -720,7 +722,13 @@ impl InputState {
                     | CFM_BOLD
                     | CFM_ITALIC
                     | CFM_COLOR
-                    | CFM_SPACING;
+                    | CFM_SPACING
+                    | CFM_CHARSET;
+                // The zeroed format's charset is ANSI: RichEdit binds the
+                // face within it and shows a box for every CJK character
+                // (the app's own text falls back per character). The
+                // system's default admits them.
+                cf.Base.bCharSet = DEFAULT_CHARSET;
                 cf.Base.yHeight = (style.font_size.0 * s * twips).round() as i32;
                 cf.wWeight = style.font_weight;
                 cf.Base.dwEffects = if style.italic {
