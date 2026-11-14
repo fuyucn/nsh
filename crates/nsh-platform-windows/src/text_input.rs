@@ -83,7 +83,7 @@ use nsh_core::{
 use rustc_hash::FxHashMap;
 use windows::{
     Win32::{
-        Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
+        Foundation::{BOOL, COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Graphics::{
             Direct2D::{
                 Common::D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
@@ -101,13 +101,14 @@ use windows::{
         },
         UI::{
             Controls::RichEdit::{
-                CFE_ITALIC, CFM_BOLD, CFM_COLOR, CFM_FACE, CFM_ITALIC, CFM_SIZE, CFM_SPACING,
-                CFM_WEIGHT, EM_CANREDO, EM_EXSETSEL, EM_GETLANGOPTIONS, EM_GETSCROLLPOS, EM_REDO,
-                EM_SETEDITSTYLE, EM_SETEVENTMASK, EM_SETLANGOPTIONS, EM_SETSCROLLPOS,
-                EM_SETTEXTMODE, EM_SETTYPOGRAPHYOPTIONS, ENM_CHANGE, ENM_ENDCOMPOSITION,
-                ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_SPELLCHECKING, IMF_TKBPREDICTION,
-                PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT, PFM_LINESPACING,
-                PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO, TM_PLAINTEXT,
+                CHARFORMAT2W, CHARRANGE, CFE_ITALIC, CFM_BOLD, CFM_COLOR, CFM_FACE, CFM_ITALIC,
+                CFM_SIZE, CFM_SPACING, CFM_WEIGHT, EM_CANREDO, EM_EXGETSEL, EM_EXSETSEL,
+                EM_GETLANGOPTIONS, EM_GETSCROLLPOS, EM_REDO, EM_SETCHARFORMAT, EM_SETEDITSTYLE,
+                EM_SETEVENTMASK, EM_SETLANGOPTIONS, EM_SETSCROLLPOS, EM_SETTEXTMODE,
+                EM_SETTYPOGRAPHYOPTIONS, ENM_CHANGE, ENM_ENDCOMPOSITION, ENM_SELCHANGE,
+                ENM_STARTCOMPOSITION, IMF_SPELLCHECKING, IMF_TKBPREDICTION, PFA_CENTER,
+                PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT, PFM_LINESPACING, PFM_RTLPARA,
+                SCF_SELECTION, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO, TM_PLAINTEXT,
                 TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
                 TXTBIT_CLIENTRECTCHANGE, TXTBIT_D2DDWRITE, TXTBIT_DISABLEDRAG,
                 TXTBIT_HIDESELECTION, TXTBIT_MAXLENGTHCHANGE, TXTBIT_MULTILINE,
@@ -146,6 +147,71 @@ use crate::{
     view::{Hosted, ItemPointer, NshView},
 };
 
+/// The face that has the CJK glyphs on this system, as DirectWrite's own
+/// per-character fallback picks for the app's text (which is why a title
+/// renders Chinese while a field shows a box for every character).
+/// Checked once: the installed fonts do not change under a live field.
+fn cjk_family() -> Option<&'static str> {
+    static FAMILY: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
+    *FAMILY.get_or_init(|| {
+        // The usual CJK companions of the UI font, Simplified Chinese
+        // first. A base install has none of them until the language
+        // feature is on, so none may exist: the field then shows what it
+        // always showed.
+        const CANDIDATES: [&str; 8] = [
+            "Microsoft YaHei UI",
+            "Microsoft YaHei",
+            "Yu Gothic UI",
+            "Meiryo UI",
+            "Malgun Gothic",
+            "Microsoft JhengHei UI",
+            "SimSun",
+            "MS Gothic",
+        ];
+        let factory = crate::gfx::dwrite();
+        let mut collection = None;
+        // SAFETY: a COM call with a local out value.
+        unsafe { factory.GetSystemFontCollection(&mut collection, false) }.ok()?;
+        let collection = collection?;
+        CANDIDATES.into_iter().find(|name| {
+            let (mut index, mut exists) = (0u32, BOOL(0));
+            // SAFETY: a query on a live collection with local out values.
+            unsafe {
+                collection
+                    .FindFamilyName(&HSTRING::from(*name), &mut index, &mut exists)
+                    .is_ok()
+                    && exists.as_bool()
+            }
+        })
+    })
+}
+
+/// The code point at UTF-16 offset `at`, and its length in units.
+fn char_at(units: &[u16], at: usize) -> (u32, usize) {
+    let u = units[at];
+    if (0xD800..0xDC00).contains(&u) && at + 1 < units.len() {
+        let l = units[at + 1];
+        if (0xDC00..0xE000).contains(&l) {
+            return (0x1_0000 + ((u - 0xD800) as u32) * 0x400 + (l - 0xDC00) as u32, 2);
+        }
+    }
+    (u as u32, 1)
+}
+
+/// Whether a CJK face has the glyph and a Latin face does not.
+fn is_cjk(c: u32) -> bool {
+    matches!(
+        c,
+        0x1100..=0x11FF
+            | 0x2E80..=0x9FFF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE4F
+            | 0xFF00..=0xFFEF
+            | 0x1_0000..=0x3_FFFF
+    )
+}
+
 /// `EM_SETSEL`.
 const EM_SETSEL: u32 = 0x00B1;
 /// `EM_CANUNDO`.
@@ -182,6 +248,12 @@ pub(crate) struct InputState {
     config: RefCell<InputConfig>,
     /// A configuration was applied (auto focus happens on the first).
     configured: Cell<bool>,
+    /// The field's face has no CJK (the UI font's, or a Latin face the app
+    /// chose): the CJK ranges take [`cjk_family`]'s face.
+    needs_cjk: Cell<bool>,
+    /// What [`InputState::apply_cjk_faces`] applied last, so a keystroke
+    /// reformats nothing when the ranges did not move.
+    cjk_applied: RefCell<Vec<(u32, u32)>>,
     /// Content box; the whole view until the core sends one.
     content: Cell<Option<Bounds<Points>>>,
     /// The size the field was hosted (and last drawn) at.
@@ -303,6 +375,8 @@ impl InputState {
                 composed: RefCell::new(None),
                 pending: RefCell::new(None),
                 programmatic: Cell::new(false),
+                needs_cjk: Cell::new(false),
+                cjk_applied: RefCell::new(Vec::new()),
                 anim_color: Cell::new(None),
                 focused: Cell::new(false),
                 active: Cell::new(true),
@@ -542,6 +616,77 @@ impl InputState {
         }
     }
 
+    /// RichEdit draws its text with the format's face and never falls back
+    /// per character, while the app's own text does (which is why a title
+    /// renders Chinese and a field shows a box for every character):
+    /// give the text's CJK ranges the system's CJK face. Runs after each
+    /// text change; a password's bullets and a live composition keep the
+    /// format's face, and a keystroke that moved no range reformats
+    /// nothing.
+    fn apply_cjk_faces(&self) {
+        if !self.needs_cjk.get()
+            || cjk_family().is_none()
+            || self.config.borrow().secure
+            || self.composing.get().is_some()
+        {
+            return;
+        }
+        let Some(e) = &self.editor else {
+            return;
+        };
+        let units = self.units();
+        let mut ranges: Vec<(u32, u32)> = Vec::new();
+        let mut start: Option<u32> = None;
+        let mut at = 0usize;
+        while at < units.len() {
+            let (c, len) = char_at(&units, at);
+            if is_cjk(c) {
+                start.get_or_insert(at as u32);
+            } else if let Some(s) = start.take() {
+                ranges.push((s, at as u32));
+            }
+            at += len;
+        }
+        if let Some(s) = start.take() {
+            ranges.push((s, units.len() as u32));
+        }
+        if *self.cjk_applied.borrow() == ranges {
+            return;
+        }
+        let family = HSTRING::from(cjk_family().expect("checked above"));
+        let mut format = CHARFORMAT2W::default();
+        format.Base.dwMask = CFM_FACE;
+        for (d, u) in format
+            .Base
+            .szFaceName
+            .iter_mut()
+            .zip(family.as_wide().iter().copied().take(31))
+        {
+            *d = u;
+        }
+        let (sel_start, sel_end) = e.selection();
+        for (s, end) in &ranges {
+            let range = CHARRANGE {
+                cpMin: *s as i32,
+                cpMax: *end as i32,
+            };
+            // SAFETY: messages on a live editor with a local's address.
+            unsafe {
+                e.send(EM_EXSETSEL, 0, &range as *const CHARRANGE as isize);
+                e.send(EM_SETCHARFORMAT, SCF_SELECTION as usize, &format as *const CHARFORMAT2W as isize);
+            }
+        }
+        let restore = CHARRANGE {
+            cpMin: sel_start as i32,
+            cpMax: sel_end as i32,
+        };
+        // SAFETY: as above; the selection the changes stole is returned.
+        unsafe {
+            e.send(EM_EXSETSEL, 0, &restore as *const CHARRANGE as isize);
+        }
+        *self.cjk_applied.borrow_mut() = ranges;
+    }
+
     /// Makes RichEdit's formats and properties from the config at the
     /// current scale.
     fn apply_formats(&self) {
@@ -556,6 +701,10 @@ impl InputState {
         let style = &config.style;
         let color = self.anim_color.get().unwrap_or(style.color);
         let face = family(style.font_family.map(|f| f.name()).as_deref());
+        // A face of the app's own choosing may carry the CJK glyphs; the
+        // UI font (the default) does not, and its CJK ranges take
+        // [`cjk_family`]'s face.
+        self.needs_cjk.set(face == crate::text::ui_family().as_ref());
         let bits = base_bits(&config);
         e.update(
             |p| {
@@ -1298,6 +1447,9 @@ fn process(surface: &Surface, view: &NshView, input: &InputState) -> bool {
         report_composition(surface, view, input);
     } else if notes.composition_start.is_some() {
         report_composition(surface, view, input);
+    }
+    if notes.changed {
+        input.apply_cjk_faces();
     }
     if notes.changed || notes.selection {
         input.wake_caret();
