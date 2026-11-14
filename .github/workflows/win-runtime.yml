@@ -1,0 +1,35 @@
+name: Windows runtime
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+      RUST_MIN_STACK: "268435456"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: win-runtime-${{ hashFiles('Cargo.lock') }}
+          restore-keys: win-runtime-
+      - name: Build the Windows runtimes
+        run: cargo build --release -p nsh-windows-host -p nsh-windows-app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nsh-windows-runtime
+          path: |
+            target/release/nsh-windows-host.exe
+            target/release/nsh-windows-app.exe
+          if-no-files-found: error
