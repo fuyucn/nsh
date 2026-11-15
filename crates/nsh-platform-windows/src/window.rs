@@ -762,7 +762,6 @@ pub(crate) fn dpi(hwnd: HWND) -> u32 {
 /// mapping between points and the window's pixels goes through this, the
 /// window opens at the forced size and the field's twips convert at the
 /// forced DPI, exactly as on a monitor of that DPI.
-#[allow(clippy::only_used_in_recursion)] // `dpi` is a different function
 pub(crate) fn scale(hwnd: HWND) -> f32 {
     static FORCED: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     let forced = *FORCED.get_or_init(|| {
@@ -773,8 +772,12 @@ pub(crate) fn scale(hwnd: HWND) -> f32 {
     });
     match forced {
         Some(scale) => scale,
-        None => crate::window::scale(hwnd),
+        None => scale_from_dpi(dpi(hwnd)),
     }
+}
+
+fn scale_from_dpi(dpi: u32) -> f32 {
+    dpi as f32 / 96.0
 }
 
 /// Tells the surface the window's client size and scale.
@@ -2104,6 +2107,13 @@ pub(crate) fn keep<T: 'static>(value: T) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scale_uses_the_window_dpi() {
+        assert_eq!(scale_from_dpi(96), 1.0);
+        assert_eq!(scale_from_dpi(144), 1.5);
+        assert_eq!(scale_from_dpi(192), 2.0);
+    }
 
     fn apply(surface: &Rc<Surface>, items: &[nsh_core::MountItem]) {
         for item in items {
