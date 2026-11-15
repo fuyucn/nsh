@@ -278,6 +278,7 @@ pub(crate) fn create(
     };
     crate::app::startup_trace("window::create after CreateWindowExW");
     surface.set_hwnd(hwnd);
+    crate::app::startup_trace("window::create after set_hwnd");
     if transparent && parent.is_none() {
         // SetWindowPos can synchronously paint through WM_SIZE. Composition
         // must exist before that first frame chooses its swap chain.
@@ -287,12 +288,15 @@ pub(crate) fn create(
         if parent.is_some() {
             window.root.set(observe_root(hwnd));
         }
+        crate::app::startup_trace("window::create before presence watch");
         window.presence.set(Some(crate::presence::watch(hwnd)));
+        crate::app::startup_trace("window::create after presence watch");
     }
     if parent.is_none() {
         OPEN.with(|o| o.set(o.get() + 1));
         // Sized in points at the window's own DPI (known once it exists).
         let scale = scale(hwnd);
+        crate::app::startup_trace(&format!("window::create got scale {scale}"));
         let dpi = (scale * 96.0).round() as u32;
         let mut rect = RECT {
             left: 0,
@@ -303,6 +307,7 @@ pub(crate) fn create(
         // SAFETY: plain calls on the window just made.
         unsafe {
             let _ = AdjustWindowRectExForDpi(&mut rect, style, false, ex_style, dpi);
+            crate::app::startup_trace("window::create before SetWindowPos");
             let _ = SetWindowPos(
                 hwnd,
                 None,
@@ -313,7 +318,9 @@ pub(crate) fn create(
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
         }
+        crate::app::startup_trace("window::create after SetWindowPos");
     }
+    crate::app::startup_trace("window::create before sync_size");
     sync_size(surface, hwnd);
     crate::app::startup_trace("window::create after sync_size");
     Ok(hwnd)
