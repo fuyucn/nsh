@@ -19,8 +19,8 @@
 //! All of it comes from the system's notifications, nothing is polled. The
 //! session and the display are the same for every window: one [`Screen`]
 //! per thread, which each surface's window keeps current (its own
-//! registrations, [`watch`], removed when it is destroyed, [`unwatch`]),
-//! read once from the session on the thread's first window; the display's
+//! registrations, [`watch`], removed when it is destroyed, [`unwatch`]);
+//! session notifications update it after registration, and the display's
 //! registration sends its current state at once. Every window gets its own
 //! copy of a notification, and each recomputes its own surface on it.
 //!
@@ -152,7 +152,6 @@ pub(crate) fn watch(hwnd: HWND) -> Watch {
         w.get() == 1
     });
     if first {
-        SCREEN.with(|s| s.set(session_now()));
         // SAFETY: an out-of-context hook: `cloak_event` runs on this
         // thread while it pumps messages; removed with the last watcher.
         let hook = unsafe {
@@ -206,39 +205,6 @@ pub(crate) fn unwatch(hwnd: HWND, watch: Watch) {
     }
 }
 
-/// The session's state now: locked, or without a display. Unknown counts
-/// as seen.
-fn session_now() -> Screen {
-    let mut buffer = PWSTR::null();
-    let mut bytes = 0u32;
-    // SAFETY: the system allocates the buffer, freed below; it holds a
-    // `WTSINFOEXW` when the call succeeds with at least its size.
-    unsafe {
-        if WTSQuerySessionInformationW(
-            Some(WTS_CURRENT_SERVER_HANDLE),
-            WTS_CURRENT_SESSION,
-            WTSSessionInfoEx,
-            &mut buffer,
-            &mut bytes,
-        )
-        .is_err()
-            || buffer.is_null()
-        {
-            return Screen::default();
-        }
-        let mut screen = Screen::default();
-        if bytes as usize >= std::mem::size_of::<WTSINFOEXW>() {
-            let info = &*(buffer.0 as *const WTSINFOEXW);
-            if info.Level == 1 {
-                let session = info.Data.WTSInfoExLevel1;
-                screen.locked = session.SessionFlags == WTS_SESSIONSTATE_LOCK as i32;
-                screen.disconnected = session.SessionState == WTSDisconnected;
-            }
-        }
-        WTSFreeMemory(buffer.0 as *mut _);
-        screen
-    }
-}
 
 /// `WM_WTSSESSION_CHANGE` with `event` came to `surface`'s window.
 pub(crate) fn session_changed(surface: &Surface, event: u32) {
