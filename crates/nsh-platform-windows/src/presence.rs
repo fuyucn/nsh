@@ -39,9 +39,7 @@ use windows::{
                 UnregisterPowerSettingNotification,
             },
             RemoteDesktop::{
-                NOTIFY_FOR_THIS_SESSION, WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
-                WTS_SESSIONSTATE_LOCK, WTSDisconnected, WTSFreeMemory, WTSINFOEXW,
-                WTSQuerySessionInformationW, WTSRegisterSessionNotification, WTSSessionInfoEx,
+                NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification,
                 WTSUnRegisterSessionNotification,
             },
             SystemServices::GUID_CONSOLE_DISPLAY_STATE,
@@ -57,7 +55,6 @@ use windows::{
             },
         },
     },
-    core::PWSTR,
 };
 
 use crate::surface::Surface;
