@@ -311,7 +311,9 @@ impl AppView {
         options: AppOptions,
         composed: bool,
     ) -> windows::core::Result<Rc<AppView>> {
+        startup_trace("AppView::make before Surface::new");
         let surface = Surface::new(initial_environment());
+        startup_trace("AppView::make after Surface::new");
         surface.appearance.set(options.appearance);
         if options.notifications {
             crate::notifications::start_app(
@@ -325,7 +327,9 @@ impl AppView {
         surface.native.set_app_id(&options.app_id);
         let transparent = options.transparent && parent.is_none();
         let composed = (composed || transparent) && parent.is_none();
+        startup_trace("AppView::make before window::create");
         let hwnd = crate::window::create(&surface, &options.title, options.size, parent, composed)?;
+        startup_trace("AppView::make after window::create");
         if parent.is_none() {
             crate::window::set_icon(hwnd, options.icon.as_deref());
             // The main window's attributes: a normal window's, with the
@@ -346,7 +350,9 @@ impl AppView {
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
+        startup_trace("AppView::make before watch_environment");
         crate::system::watch_environment(&view.surface);
+        startup_trace("AppView::make after watch_environment");
         if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
             view.surface.enable_fps();
         }
@@ -806,7 +812,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     }
 }
 
-fn startup_trace(stage: &str) {
+pub(crate) fn startup_trace(stage: &str) {
     use std::io::Write as _;
 
     let path = std::env::temp_dir().join("nsh-windows-startup-trace.log");

@@ -228,7 +228,9 @@ pub(crate) fn create(
     parent: Option<HWND>,
     transparent: bool,
 ) -> windows::core::Result<HWND> {
+    crate::app::startup_trace("window::create before register_classes");
     register_classes();
+    crate::app::startup_trace("window::create after register_classes");
     let data = Box::new(WindowData {
         surface: Rc::downgrade(surface),
         top_level: parent.is_none(),
@@ -257,6 +259,7 @@ pub(crate) fn create(
     };
     // SAFETY: the class is registered; `data` is handed to the window
     // (`WM_NCCREATE` stores it, `WM_NCDESTROY` frees it).
+    crate::app::startup_trace("window::create before CreateWindowExW");
     let hwnd = unsafe {
         CreateWindowExW(
             ex_style,
@@ -273,6 +276,7 @@ pub(crate) fn create(
             Some(Box::into_raw(data) as *const _),
         )?
     };
+    crate::app::startup_trace("window::create after CreateWindowExW");
     surface.set_hwnd(hwnd);
     if transparent && parent.is_none() {
         // SetWindowPos can synchronously paint through WM_SIZE. Composition
@@ -311,6 +315,7 @@ pub(crate) fn create(
         }
     }
     sync_size(surface, hwnd);
+    crate::app::startup_trace("window::create after sync_size");
     Ok(hwnd)
 }
 
