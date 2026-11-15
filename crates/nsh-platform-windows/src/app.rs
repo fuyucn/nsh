@@ -813,6 +813,9 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
 }
 
 pub(crate) fn startup_trace(stage: &str) {
+    if std::env::var_os("NSH_STARTUP_TRACE").is_none() {
+        return;
+    }
     use std::io::Write as _;
 
     let path = std::env::temp_dir().join("nsh-windows-startup-trace.log");
